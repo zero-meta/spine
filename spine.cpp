@@ -37,6 +37,7 @@
 #include <spine/extension.h>
 #include <spine/spine.h>
 #include <core/method_bind_ext.gen.inc>
+#include "core/version_generated.gen.h"
 
 Spine::SpineResource::SpineResource() {
 
@@ -94,6 +95,10 @@ void Spine::_spine_dispose() {
 	if (playing) {
 		// stop first
 		stop();
+	}
+
+	if (clipper) {
+		spSkeletonClipping_dispose(clipper);
 	}
 
 	if (state) {
@@ -251,10 +256,11 @@ void Spine::_animation_draw() {
 
 		Color color(0, 0, 1, 1);
 		for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-
 			spSlot *slot = skeleton->drawOrder[i];
 			if (!slot->attachment)
 				continue;
+			triangles = NULL;
+			triangles_count = 0;
 			switch (slot->attachment->type) {
 
 				case SP_ATTACHMENT_REGION: {
@@ -424,7 +430,7 @@ bool Spine::_set(const StringName &p_name, const Variant &p_value) {
 				stop();
 			else if (has_animation(which)) {
 				reset();
-				play(which, 1, loop);
+				play(which, loop);
 			}
 		} else
 			current_animation = which;
@@ -439,7 +445,7 @@ bool Spine::_set(const StringName &p_name, const Variant &p_value) {
 
 		loop = p_value;
 		if (skeleton != NULL && has_animation(current_animation))
-			play(current_animation, 1, loop);
+			play(current_animation, loop);
 	} else if (name == "playback/forward") {
 
 		forward = p_value;
@@ -620,13 +626,14 @@ void Spine::set_resource(Ref<Spine::SpineResource> p_data) {
 	state = spAnimationState_create(spAnimationStateData_create(skeleton->data));
 	state->rendererObject = this;
 	state->listener = spine_animation_callback;
+	clipper = spSkeletonClipping_create();
 
 	_update_verties_count();
 
 	if (skin != "")
 		set_skin(skin);
 	if (current_animation != "[stop]")
-		play(current_animation, 1, loop);
+		play(current_animation, loop);
 	else
 		reset();
 
@@ -767,8 +774,9 @@ void Spine::reset() {
 	if (skeleton == NULL) {
 		return;
 	}
-	spSkeleton_setToSetupPose(skeleton);
-	spAnimationState_update(state, 0);
+	// spSkeleton_setToSetupPose(skeleton);
+	spAnimationState_setEmptyAnimations(state, .0f);
+	spAnimationState_update(state, .0f);
 	spAnimationState_apply(state, skeleton);
 	spSkeleton_updateWorldTransform(skeleton);
 }
@@ -876,8 +884,10 @@ Dictionary Spine::get_skeleton() const {
 	dict["slotCount"] = skeleton->slotsCount;
 	dict["ikConstraintsCount"] = skeleton->ikConstraintsCount;
 	dict["time"] = skeleton->time;
-	dict["flipX"] = skeleton->flipX;
-	dict["flipY"] = skeleton->flipY;
+	// dict["flipX"] = skeleton->flipX;
+	// dict["flipY"] = skeleton->flipY;
+	dict["scaleX"] = skeleton->scaleX;
+	dict["scaleY"] = skeleton->scaleY;
 	dict["x"] = skeleton->x;
 	dict["y"] = skeleton->y;
 
@@ -1335,6 +1345,7 @@ Spine::Spine()
 	skeleton = NULL;
 	root_bone = NULL;
 	state = NULL;
+	clipper = NULL;
 	res = RES();
 	world_verts.resize(1000); // Max number of vertices per mesh.
 	memset(world_verts.ptrw(), 0, world_verts.size() * sizeof(float));
