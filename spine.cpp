@@ -152,17 +152,19 @@ void Spine::_animation_draw() {
 
 	if (skeleton == NULL)
 		return;
-
 	spColor_setFromFloats(&skeleton->color, modulate.r, modulate.g, modulate.b, modulate.a);
+	if (skeleton->color.a == 0) return;
+	if (vertexEffect != NULL) vertexEffect->begin(vertexEffect, skeleton);
 
 	int additive = 0;
 	int fx_additive = 0;
 	Color color;
-	const float *uvs = NULL;
+	float *uvs = NULL;
 	int verties_count = 0;
 	unsigned short *triangles = NULL;
 	int triangles_count = 0;
 	float r = 0, g = 0, b = 0, a = 0;
+	spColor *attachment_color;
 
 	RID ci = this->get_canvas_item();
 	batcher.reset();
@@ -171,17 +173,18 @@ void Spine::_animation_draw() {
 	const char *fx_prefix = fx_slot_prefix.get_data();
 
 	for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-
 		spSlot *slot = skeleton->drawOrder[i];
 		if (!slot->attachment) continue;
 		bool is_fx = false;
 		Ref<Texture> texture;
 		switch (slot->attachment->type) {
-
 			case SP_ATTACHMENT_REGION: {
-
 				spRegionAttachment *attachment = (spRegionAttachment *)slot->attachment;
 				is_fx = strstr(attachment->path, fx_prefix) != NULL;
+				if (attachment->color.a == 0) {
+					spSkeletonClipping_clipEnd(clipper, slot);
+					continue;
+				}
 				spRegionAttachment_computeWorldVertices(attachment, slot->bone, world_verts.ptrw(), 0, 2);
 				texture = spine_get_texture(attachment);
 				uvs = attachment->uvs;
@@ -196,9 +199,13 @@ void Spine::_animation_draw() {
 				break;
 			}
 			case SP_ATTACHMENT_MESH: {
-
 				spMeshAttachment *attachment = (spMeshAttachment *)slot->attachment;
 				is_fx = strstr(attachment->path, fx_prefix) != NULL;
+				if (attachment->color.a == 0) {
+					spSkeletonClipping_clipEnd(clipper, slot);
+					continue;
+				}
+				// if (attachment->super.worldVerticesLength > SPINE_MESH_VERTEX_COUNT_MAX) continue;
 				spVertexAttachment_computeWorldVertices(SUPER(attachment), slot, 0, attachment->super.worldVerticesLength, world_verts.ptrw(), 0, 2);
 				texture = spine_get_texture(attachment);
 				uvs = attachment->uvs;
@@ -211,14 +218,18 @@ void Spine::_animation_draw() {
 				a = attachment->color.a;
 				break;
 			}
-
-			case SP_ATTACHMENT_BOUNDING_BOX: {
-
-				continue;
+			// case SP_ATTACHMENT_BOUNDING_BOX: {
+			// 	continue;
+			// }
+			case SP_ATTACHMENT_CLIPPING: {
+				spClippingAttachment* clip = (spClippingAttachment*)slot->attachment;
+				spSkeletonClipping_clipStart(clipper, slot, clip);
 			}
+			default: ;
 		}
 		if (texture.is_null())
 			continue;
+		// slot->data->blendMode
 		/*
 		if (is_fx && slot->data->blendMode != fx_additive) {
 
@@ -243,12 +254,31 @@ void Spine::_animation_draw() {
 		color.g = skeleton->color.g * slot->color.g * g;
 		color.b = skeleton->color.b * slot->color.b * b;
 
+		if (spSkeletonClipping_isClipping(clipper)) {
+			float *vertices = world_verts.ptrw();
+			spSkeletonClipping_clipTriangles(clipper, vertices, verties_count, triangles, triangles_count, uvs, 2);
+			float *items = clipper->clippedVertices->items;
+			verties_count = clipper->clippedVertices->size;
+			for (int i = 0; i < verties_count; ++i)
+			{
+				vertices[i] = items[i];
+			}
+			uvs = clipper->clippedUVs->items;
+			triangles = clipper->clippedTriangles->items;
+			triangles_count = clipper->clippedTriangles->size;
+		}
+
 		if (is_fx)
 			fx_batcher.add(texture, world_verts.ptr(), uvs, verties_count, triangles, triangles_count, &color, flip_x, flip_y);
 		else
 			batcher.add(texture, world_verts.ptr(), uvs, verties_count, triangles, triangles_count, &color, flip_x, flip_y);
+
+		spSkeletonClipping_clipEnd(clipper, slot);
 	}
 	batcher.flush();
+	spSkeletonClipping_clipEnd2(clipper);
+	if (vertexEffect != NULL) vertexEffect->end(vertexEffect);
+
 	fx_node->update();
 
 	// Slots.
@@ -1346,6 +1376,8 @@ Spine::Spine()
 	root_bone = NULL;
 	state = NULL;
 	clipper = NULL;
+	vertexEffect = NULL;
+	skeleton = NULL;
 	res = RES();
 	world_verts.resize(1000); // Max number of vertices per mesh.
 	memset(world_verts.ptrw(), 0, world_verts.size() * sizeof(float));

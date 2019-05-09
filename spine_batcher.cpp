@@ -92,7 +92,7 @@ void SpineBatcher::Elements::draw(RID ci) {
 #endif
 		texture->get_rid()
 	);
-
+	// VisualServer::get_singleton()->canvas_item_set_ma
 }
 
 void SpineBatcher::add(Ref<Texture> p_texture,
